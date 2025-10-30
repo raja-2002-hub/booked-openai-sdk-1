@@ -19,7 +19,7 @@ pnpm install   # or: npm install
 pnpm run build # or: npm run build
 # Artifacts in ui-widgets/dist/assets
 
-## Install & Build (UI)
+## Folder Structure
 
 mini_bookedai/
 ├── graph/                                  # ✅ LangGraph implementation + MCP adapter

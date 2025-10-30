@@ -22,7 +22,8 @@ mini_bookedai-master/
 ├─ .env.example            # template for environment variables
 ├─ .gitignore
 ├─ requirements.txt
-├─ ui-widgets/             # React widgets (Vite)
+├─ ui-widgets/
+│  ├─ built-all.mjs           # React widgets (Vite)
 │  ├─ package.json
 │  ├─ pnpm-lock.yaml       # if you use pnpm
 │  ├─ src/

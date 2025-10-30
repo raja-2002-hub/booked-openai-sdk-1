@@ -15,23 +15,22 @@ This repo is ready for Daryl to import into the `mini-booked` monorepo when appr
 
 ## Folder Structure
 
-mini_bookedai-master/
+booked-openai-sdk-1/
 ├─ README.md
-├─ .env # (not committed; create from .env.example)
-├─ .env.example # template for environment variables
-├─ .gitignore
 ├─ requirements.txt
+├─ .env.example
+├─ .gitignore
 ├─ ui-widgets/ # React widgets (Vite)
 │ ├─ package.json
-│ ├─ pnpm-lock.yaml # if you use pnpm
+│ ├─ pnpm-lock.yaml # if you use pnpm; else npm lockfile
 │ ├─ src/
-│ │ ├─ flight-card/ # Flight card widget
-│ │ └─ hello-widget/ # Hello demo widget
-│ └─ dist/ # build output: dist/assets/* (gitignored)
+│ │ ├─ flight-card/...
+│ │ └─ hello-widget/...
+│ └─ dist/ # (build output; ignored by git)
 └─ graph/
 └─ mcp_adapter/
-├─ server.py # Tools only
-└─ server_UI.py # Tools + UI (text/html+skybridge)
+├─ server.py # tools only
+└─ server_UI.py # tools + UI (text/html+skybridge)
 
 
 > **.env location:** place `.env` in the **project root**, one level above `graph/`.

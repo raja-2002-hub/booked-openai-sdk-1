@@ -1,0 +1,37 @@
+{
+  "name": "ui-widgets",
+  "version": "1.0.1",
+  "private": true,
+  "description": "UI widgets for Apps SDK (Vite + React)",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "node build-all.mjs",
+    "serve": "vite preview --port 4444 --strictPort",
+    "start:static": "node backend_combined.js",
+    "lint": "echo \"no linter configured\"",
+    "build-and-preview": "pnpm run build && pnpm run serve"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "autoprefixer": "^10.4.21",
+    "fast-glob": "^3.3.3",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.14",
+    "vite": "^7.1.10"
+  },
+  "build-and-preview": "pnpm run build && pnpm run serve"
+}
+

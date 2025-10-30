@@ -1,0 +1,6 @@
+﻿node_modules/
+ui-widgets/dist/
+ui-widgets/.vite/
+.venv/
+__pycache__/
+.env

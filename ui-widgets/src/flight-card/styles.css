@@ -1,0 +1,226 @@
+/* ui-widgets/src/flight-card/styles.css */
+
+/* Base layout */
+.fc-wrap {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
+  color: #0f172a;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header above the cards (route/date) */
+.fc-header-route {
+  font-size: 16px;
+  letter-spacing: 0.2px;
+}
+.fc-header-date {
+  margin-top: 2px;
+}
+
+/* Card row */
+.fc-row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto; /* airline | main | right */
+  align-items: center;
+  gap: 12px;
+  border: 2px solid #caeaff;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px 12px;
+  box-sizing: border-box;
+  overflow: hidden; /* clip any overflows */
+}
+
+.fc-row--highlight {
+  border-color: #a9e2ff;
+  box-shadow: 0 0 0 4px rgba(54, 162, 235, 0.08) inset;
+  background: #f7fcff;
+}
+
+/* Airline column */
+.fc-airline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  min-width: 92px;
+  height: 40px;            /* reserve vertical space so logos don't push text */
+  overflow: hidden;        /* clip large SVGs/PNGs */
+}
+
+.fc-airline-logo {
+  display: block;
+  height: 24px;            /* control visual size */
+  width: auto;
+  max-width: 88px;         /* keep within column */
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+  pointer-events: none;
+}
+
+.fc-airline-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  max-width: 88px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-weight: 700;
+  font-size: 12.5px;
+  line-height: 1.1;
+  text-align: center;
+  color: #0f172a;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Main column (date/times/route) */
+.fc-main {
+  min-width: 0; /* enable text truncation inside */
+}
+
+.fc-date {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.fc-wday {
+  font-weight: 600;
+  color: #374151;
+}
+
+.fc-date-text {
+  font-weight: 500;
+}
+
+.fc-sub {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.fc-times {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fc-time {
+  font-weight: 800;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.fc-dash {
+  opacity: 0.6;
+}
+
+.fc-dur {
+  font-size: 13px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+/* Right column (status pill, price, info button) */
+.fc-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.fc-pill {
+  width: 46px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #22c55e;
+}
+
+.fc-price {
+  font-weight: 800;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+/* Small round info button */
+.fc-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+  user-select: none;
+}
+.fc-icon-btn:hover {
+  background: #f9fafb;
+}
+.fc-icon-btn:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Show-all button */
+.fc-showall {
+  width: 100%;
+  text-align: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid #caeaff;
+  background: #eff8ff;
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fc-showall:hover {
+  background: #e7f4ff;
+}
+.fc-showall:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Empty state */
+.fc-empty {
+  text-align: center;
+  padding: 18px 12px;
+  color: #6b7280;
+  border: 1px dashed #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+/* Responsive tweaks */
+@media (max-width: 480px) {
+  .fc-row {
+    grid-template-columns: 72px 1fr auto;
+    padding: 12px 10px;
+  }
+  .fc-airline {
+    width: 72px;
+    min-width: 72px;
+  }
+  .fc-airline-logo {
+    height: 22px;
+    max-width: 70px;
+  }
+  .fc-time {
+    font-size: 16px;
+  }
+  .fc-dur {
+    font-size: 12px;
+  }
+}

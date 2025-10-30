@@ -6,7 +6,6 @@ Minimal ChatGPT MCP + React widgets (flight card demo) for BookedAI.
 - `ui-widgets/` – React widgets built with Vite (one folder per widget).
 - `graph/mcp_adapter/server.py` – MCP server that returns widgets as `text/html+skybridge` and exposes:
   - `GET/POST /mcp`
-  - `GET/POST /mcp/messages`
 
 ## Prereqs
 - Node 18+ with pnpm or npm
@@ -20,7 +19,7 @@ pnpm install   # or: npm install
 pnpm run build # or: npm run build
 # Artifacts in ui-widgets/dist/assets
 
-## Folders structure
+## Install & Build (UI)
 
 mini_bookedai/
 ├── graph/                                  # ✅ LangGraph implementation + MCP adapter

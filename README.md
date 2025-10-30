@@ -138,8 +138,8 @@ cd mini_bookedai-master
 call .venv\Scripts\activate.bat
 set PYTHONNOUSERSITE=1
 set ASSETS_BASE_URL=http://localhost:4444/assets
-uvicorn graph.mcp_adapter.server_UI:app --host 127.0.0.1 --port 3001 --reload
-# -> http://127.0.0.1:3001
+uvicorn graph.mcp_adapter.server_UI:app --host 127.0.0.1 --port 3000 --reload
+# -> http://127.0.0.1:3000
 ```
 
 **Alternative (only if `Server_UI.py` has a `__main__` block that runs uvicorn):**

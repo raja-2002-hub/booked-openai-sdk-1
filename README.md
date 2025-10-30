@@ -200,13 +200,4 @@ Restart the **UI** MCP server after changing `ASSETS_BASE_URL`.
 
 
 
-## Commit Style
-
-Use Conventional Commits for clarity:
-- `feat(mcp): add demo_search_flight tool`
-- `fix(ui): bind widget to window.openai.toolOutput`
-- `docs: add tunnel instructions`
-
----
-
 #

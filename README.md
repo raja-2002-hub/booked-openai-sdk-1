@@ -10,7 +10,7 @@ Minimal ChatGPT MCP + React widgets (flight card demo) for BookedAI.
 ## Prereqs
 - Node 18+ with pnpm or npm
 - Python 3.11+
-- No secrets committed. Use `.env` locally; see `.env.example`.
+- Use `.env` locally; see `.env.example`.
 
 ## Install & Build (UI)
 ```bash

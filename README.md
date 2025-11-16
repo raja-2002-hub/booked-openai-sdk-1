@@ -33,7 +33,7 @@ mini_bookedai-master/
 └─ graph/
    └─ mcp_adapter/
       ├─ server.py         # tools only
-      └─ server_UI.py      # tools + UI (text/html+skybridge)
+      └─ Server_F.py      # tools + UI (text/html+skybridge)
 ```
 
 > **.env location:** place `.env` in the **project root**, one level above `graph/`.
@@ -139,8 +139,8 @@ cd mini_bookedai-master
 call .venv\Scripts\activate.bat
 set PYTHONNOUSERSITE=1
 set ASSETS_BASE_URL=http://localhost:4444/assets
-uvicorn graph.mcp_adapter.server_UI:app --host 127.0.0.1 --port 3000 --reload
-# -> http://127.0.0.1:3000
+uvicorn graph.mcp_adapter.Server_F:app --host 127.0.0.1 --port 3000 --reload
+# -> http://0.0.0.0:8000
 ```
 
 **Alternative (only if `Server_UI.py` has a `__main__` block that runs uvicorn):**
@@ -149,7 +149,7 @@ cd mini_bookedai-master
 call .venv\Scripts\activate.bat
 set PYTHONNOUSERSITE=1
 set ASSETS_BASE_URL=http://localhost:4444/assets
-python graph\mcp_adapter\Server_UI.py
+python graph\mcp_adapter\Server_F.py
 # default uvicorn port is usually 8000 if started inside the script
 ```
 

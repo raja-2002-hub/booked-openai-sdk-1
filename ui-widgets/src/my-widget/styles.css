@@ -1,0 +1,3 @@
+@import "tailwindcss";
+/* keep at least one rule so Vite always emits a CSS asset */
+:root { --my-widget-has-css: 1; }

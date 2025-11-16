@@ -1,5 +1,4 @@
-﻿// ui-widgets/src/flight-card/index.jsx
-import React, { useMemo, useState, useSyncExternalStore } from "react";
+﻿import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -19,27 +18,39 @@ function useOpenAiGlobal(key) {
     );
 }
 
+// Time/Date helpers
+const toTime = (iso) => {
+    if (!iso) return "";
+    const t = new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return t.replace(/\s(AM|PM)$/, "\u00A0$1"); // non-breaking AM/PM
+};
+
+const toDateDDMonYY = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const day = d.toLocaleDateString([], { day: "2-digit" });
+    const mon = d.toLocaleDateString([], { month: "short" });
+    const yy = d.toLocaleDateString([], { year: "2-digit" }); // 2025 -> 25
+    return `${day} ${mon} ${yy}`;
+};
+
 /** Convert any supported toolOutput shape -> flat rows for rendering */
 function coerceToRows(output) {
-    // Preferred: already-normalized from the server
     if (output && Array.isArray(output.flights) && output.flights.length) {
         const f0 = output.flights[0];
-        if (f0.airlineShort || f0.depart || f0.route) {
-            // Already flat row shape
-            return output.flights;
-        }
+        if (f0.airlineShort || f0.depart || f0.route) return output.flights;
 
-        // Fallback: Duffel-like "flights" -> flatten minimally in the iframe
+        // Flatten Duffel-like results
         return output.flights.map((item, i) => {
             const sl = (item.slices || [])[0] || {};
             const segs = sl.segments || [];
             const a = segs[0] || {};
             const b = segs[segs.length - 1] || {};
-            const toTime = (iso) =>
-                iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+
             const d0 = a.departure_time || a.departing_at || b.arrival_time || b.arriving_at || "";
             const wday = d0 ? new Date(d0).toLocaleDateString([], { weekday: "short" }) + "," : "";
-            const date = d0 ? new Date(d0).toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" }) : "";
+            const date = toDateDDMonYY(d0);
+
             const org = a.origin?.iata_code || a.origin || "";
             const dst = b.destination?.iata_code || b.destination || "";
 
@@ -78,14 +89,18 @@ function FlightHeader({ meta }) {
 function Row({ f }) {
     return (
         <div className={`fc-row ${f.highlight ? "fc-row--highlight" : ""}`}>
+            {f.highlight && <span className="fc-best">Best!</span>}
+
             <div className="fc-airline">
                 {f.airlineLogo ? (
-                    <img
-                        className="fc-airline-logo"
-                        src={f.airlineLogo}
-                        alt={f.airlineShort || "Airline"}
-                        referrerPolicy="no-referrer"
-                    />
+                    <span className="fc-logo-viewport" aria-hidden="true">
+                        <img
+                            className="fc-airline-logo"
+                            src={f.airlineLogo}
+                            alt={f.airlineShort || "Airline"}
+                            referrerPolicy="no-referrer"
+                        />
+                    </span>
                 ) : (
                     <span className="fc-airline-badge">{f.airlineShort || "Airline"}</span>
                 )}
@@ -97,10 +112,13 @@ function Row({ f }) {
                     <span className="fc-date-text">{f.date || ""}</span>
                     <span className="fc-sub">Departure</span>
                 </div>
+
                 <div className="fc-times">
-                    <span className="fc-time">{f.depart || ""}</span>
-                    <span className="fc-dash">–</span>
-                    <span className="fc-time">{f.arrive || ""}</span>
+                    <div className="fc-time-row">
+                        <span className="fc-time">{f.depart || ""}</span>
+                        <span className="fc-dash">–</span>
+                        <span className="fc-time">{f.arrive || ""}</span>
+                    </div>
                     <span className="fc-dur">
                         {f.route || ""}{f.duration ? ` ${f.duration}` : ""}
                     </span>
@@ -109,7 +127,7 @@ function Row({ f }) {
 
             <div className="fc-right">
                 {f.price ? <div className="fc-price" title="Price">{f.price}</div> : <div className="fc-pill" />}
-                <button className="fc-icon-btn" title="Details">i</button>
+                <button className="fc-icon-btn" title="Details" aria-label="Details">i</button>
             </div>
         </div>
     );
@@ -126,9 +144,7 @@ function App() {
     return (
         <div className="fc-wrap">
             <FlightHeader meta={meta} />
-
             {visible.map((f) => <Row key={f.id} f={f} />)}
-
             {flights.length > 2 && (
                 <button
                     className="fc-showall"
@@ -138,7 +154,6 @@ function App() {
                     {expanded ? "Collapse flights" : `Show all ${flights.length} Flights!`}
                 </button>
             )}
-
             {!flights.length && <div className="fc-empty">Waiting for results…</div>}
         </div>
     );

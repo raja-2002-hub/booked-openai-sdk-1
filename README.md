@@ -61,20 +61,33 @@ Create `.env` at the project root using the template below.
 OPENAI_API_KEY=sk-your-openai-key
 DUFFEL_API_KEY=duffel_test_your-key
 
-# Where the built widget assets are served from (must end with /assets)
-# Local dev (served by http-server on port 4444):
-ASSETS_BASE_URL=http://localhost:4444/assets
 
-# If tunneling via Cloudflare or ngrok, replace with the public HTTPS URL:
-# ASSETS_BASE_URL=https://<your-subdomain>.trycloudflare.com/assets
-# ASSETS_BASE_URL=https://<random>.ngrok.io/assets
+# -------- Duffel Sandbox (free) --------
+# Get a sandbox token from your Duffel dashboard; it starts with duffel_test_
+DUFFEL_API_TOKEN=<yuor key >
 
-# Mapbox (only if your widget uses maps)
-MAPBOX_TOKEN=pk.your-mapbox-token
+# -------- Optional features (leave blank or remove if unused) --------
+# MEM0_API_KEY=
+MEM0_NAMESPACE=bookedai
 
-# MCP server host/port
-MCP_HOST=127.0.0.1
-MCP_PORT=3000
+# LangSmith tracing (optional)
+# LANGCHAIN_TRACING_V2=true
+# LANGCHAIN_API_KEY=
+# LANGCHAIN_PROJECT=BookedAI-Agent
+
+# CORS (set if you have a separate frontend)
+# CORS_ORIGINS=http://localhost:3000
+
+
+STRIPE_SECRET_KEY=<your key >
+STRIPE_PUBLISHABLE_KEY=<your key> 
+# Optional (only when you wire up webhooks)
+# STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxx
+PUBLIC_BASE_URL=http://localhost:8000
+
+# Used by your helper when confirming server-side
+STRIPE_RETURN_URL=http://localhost:4444/return
+
 ```
 
 ---

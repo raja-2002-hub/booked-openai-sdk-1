@@ -1,0 +1,295 @@
+/* Root wrapper */
+.fc-wrap {
+  position: relative;
+  font-family: system-ui, -apple-system, "SF Pro Text", Segoe UI, Roboto, Inter,
+    Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #111827;
+  background: transparent;
+}
+
+/* Header summary */
+.fc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.fc-route-summary {
+  font-weight: 600;
+  font-size: 13px;
+  color: #111827;
+}
+
+.fc-count {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* List */
+.fc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Card base */
+.fc-card {
+  position: relative;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 12px 16px 14px; /* slightly taller */
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  transition: box-shadow 0.14s ease, transform 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.fc-card--highlight {
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.25);
+}
+
+.fc-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(15, 23, 42, 0.18);
+}
+
+.fc-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Top badges row */
+.fc-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+/* Pills */
+.fc-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Default duration pill (red, like your screenshot's alt options) */
+.fc-pill--time {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* When card is highlighted / "Best" */
+.fc-pill--time-best {
+  background: #22c55e;
+  color: #f9fafb;
+}
+
+.fc-pill--best {
+  background: #22c55e;
+  color: #f9fafb;
+}
+
+/* Main row (3 columns + info) */
+.fc-main {
+  display: flex;
+  align-items: flex-start; /* move timing up */
+  gap: 18px;
+  min-height: 60px; /* more breathing room for logo + text */
+}
+
+/* Columns */
+.fc-col {
+  min-width: 0;
+}
+
+.fc-col-airline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1.2;
+}
+
+.fc-col-date {
+  flex: 1;
+}
+
+.fc-col-times {
+  flex: 1.1;
+  text-align: right;
+}
+
+/* Airline block */
+.fc-airline-logo {
+  width: 40px;  /* bigger logo */
+  height: 40px;
+  border-radius: 999px;
+  object-fit: contain;
+  background: #f3f4f6;
+}
+
+.fc-airline-logo--placeholder {
+  width: 44px !important;    /* tweak 44 → 48 if you want even bigger */
+  height: 44px !important;
+  border-radius: 999px;
+  background: #f3f4f6;
+  object-fit: contain;
+}
+
+.fc-airline-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* Date block */
+.fc-date-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.fc-weekday {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.fc-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.fc-departure-label {
+  margin-top: 1px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+}
+
+/* Times block */
+.fc-time-range {
+  font-size: 14px;  /* slightly softer than 15/700 */
+  font-weight: 600;
+  color: #111827;
+}
+
+.fc-route {
+  margin-top: 1px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+/* Info icon on the right */
+.fc-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 10px;
+}
+
+.fc-info-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #ffffff;
+}
+
+/* Empty state */
+.fc-empty {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+/* Show-all widget */
+.fc-show-all-wrap {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.fc-show-all-btn {
+  border: none;
+  background: #ffffff;
+  padding: 8px 18px;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.fc-show-all-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
+}
+
+.fc-show-all-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Selection bubble (preview of what was sent) */
+.fc-bubble {
+ display: none;
+}
+
+.fc-bubble > div + div {
+  margin-top: 2px;
+}
+
+.fc-bubble-cta {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+}
+
+.fc-bubble.is-sending .fc-bubble-cta {
+  color: #2563eb;
+}
+
+.fc-bubble.is-sent .fc-bubble-cta {
+  color: #16a34a;
+}
+
+/* Error text */
+.fc-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #b91c1c;
+}
+
+/* Diagnostics badge (dev only) */
+.fc-diagnostics {
+ display: none;
+}

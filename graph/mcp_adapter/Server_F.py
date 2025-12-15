@@ -20,7 +20,7 @@ load_dotenv(GRAPH_ROOT / ".env")   # load .../graph/.env (not parent)
 
 # --- Stripe + Starlette ---
 import stripe
-from starlette.responses import RedirectResponse, PlainTextResponse,HTMLResponse
+from starlette.responses import RedirectResponse, PlainTextResponse,HTMLResponse,JSONResponse
 from starlette.routing import Route
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -53,11 +53,32 @@ BLOCK_NEXT_FLIGHT_SEARCH: bool = False
 #  One-shot toggle to block the *next* fetch_hotel_rates_ui
 BLOCK_NEXT_ROOM_RATES: bool = False
 
+# One-shot toggle to block the *next* start_hotel_checkout
+BLOCK_NEXT_HOTEL_CHECKOUT: bool = False
+
+# One-shot toggle to block the *next* start_flight_checkout
+BLOCK_NEXT_FLIGHT_CHECKOUT: bool = False
+
+
 # ---------- simple validation helpers ----------
 import re
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CURRENCY_WHITELIST = {"AUD"}
 ZERO_DECIMAL = {"JPY", "KRW"}
+
+# Basic phone sanity check (server-side guard, not as strict as libphonenumber)
+PHONE_RE = re.compile(r"^\+?[0-9\s\-()]{7,20}$")
+
+def _is_valid_phone(phone: str) -> bool:
+    """
+    Very basic phone validator.
+    Accepts E.164-style or simple local-looking numbers:
+    digits, spaces, dashes, and parentheses.
+    """
+    if not phone:
+        return False
+    return bool(PHONE_RE.match(phone))
+
 
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
@@ -209,7 +230,17 @@ ROOM = Widget(
     html=resolve_widget_html("room-card", "room-card-root"),
 )
 
-WIDGETS = {w.tool_name: w for w in (FLIGHT, HOTEL, ROOM)}
+# Payment ui declaration
+PAYMENT = Widget(
+    tool_name="payment-card",
+    title="Show Payment Status",
+    template_uri="ui://widget/payment-card.html",
+    root_id="payment-card-root",
+    html=resolve_widget_html("payment-card", "payment-card-root"),
+)
+
+
+WIDGETS = {w.tool_name: w for w in (FLIGHT, HOTEL, ROOM, PAYMENT)}
 URI_TO_WIDGET = {w.template_uri: w for w in WIDGETS.values()}
 
 
@@ -252,11 +283,17 @@ def _iso_to_local_hm(iso_str: str) -> str:
         return m.group(1) if m else (iso_str or "")
 
 def _weekday_date_from_iso(iso_str: str) -> tuple[str, str]:
+    """
+    Parse an ISO timestamp into:
+      - weekday short name, e.g. "Mon"
+      - date label, e.g. "22 Dec"
+    """
     try:
         d = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        return d.strftime("%a") + ",", d.strftime("%d %b %Y")
+        return d.strftime("%a"), d.strftime("%d %b")
     except Exception:
         return "", ""
+
 
 def _duration_label(total_minutes: int | None, fallback="—") -> str:
     if not isinstance(total_minutes, int) or total_minutes <= 0:
@@ -264,7 +301,45 @@ def _duration_label(total_minutes: int | None, fallback="—") -> str:
     h, m = divmod(total_minutes, 60)
     return f"{h}h {m}m" if m else f"{h}h"
 
+
 def _normalize_any_to_flights(data: dict) -> dict:
+    """
+    Normalises various Duffel-like flight offer payloads into a simple list of
+    cards that the FlightCard widget can render.
+
+    Each normalised flight looks like:
+
+        {
+          "id": "off_...",
+          "airlineShort": "British Airways",
+          "airlineLogo": "https://...",
+          "weekday": "Mon",
+          "date": "22 Dec → 27 Dec",   # display string
+          "depart": "16:15",
+          "arrive": "17:46",
+          "route": "SYD–MEL",
+          "duration": "1h 35m",
+          "highlight": true/false,
+
+          # Optional return leg; if absent, widget shows 1 row only
+          "returnWeekday": "Sat",
+          "returnDate": "27 Dec",
+          "returnDepart": "20:07",
+          "returnArrive": "21:38",
+          "returnRoute": "MEL–SYD",
+        }
+
+    And meta:
+
+        {
+          "total": N,
+          "origin": "SYD",
+          "destination": "MEL",
+          "date": "22 Dec",
+          "return_date": "27 Dec" | None,
+        }
+    """
+    # Already-normalised form from our own widget (pass-through)
     if isinstance(data, dict) and isinstance(data.get("flights"), list):
         rows = data["flights"]
         if rows and (rows[0].get("airlineShort") or rows[0].get("depart") or rows[0].get("route")):
@@ -277,14 +352,18 @@ def _normalize_any_to_flights(data: dict) -> dict:
     else:
         return {"flights": [], "meta": {"total": 0}}
 
-    norm = []
+    norm: list[dict] = []
     origin = destination = date_str = ""
+    return_date_str = ""
 
     for i, item in enumerate(src):
         offer_id = item.get("id") or item.get("offer_id") or f"offer_{i}"
 
         airline = (
-            item.get("airline") or item.get("owner") or item.get("airline_code") or "Airline"
+            item.get("airline")
+            or item.get("owner")
+            or item.get("airline_code")
+            or "Airline"
         )
         airline_logo = (
             item.get("airline_logo")
@@ -293,39 +372,139 @@ def _normalize_any_to_flights(data: dict) -> dict:
             or None
         )
 
-        sl = (item.get("slices") or [None])[0] or {}
-        segs = sl.get("segments") or []
-        first, last = (segs[0] if segs else {}), (segs[-1] if segs else {})
+        # --- slices: outbound + (optional) inbound ---
+        slices = item.get("slices") or []
+        outbound_slice = slices[0] if slices else {}
+        return_slice = slices[1] if len(slices) > 1 else None
 
-        dep_iso = first.get("departing_at") or first.get("depart_at") or first.get("departure_time") or ""
-        arr_iso = last.get("arriving_at") or last.get("arrive_at") or last.get("arrival_time") or ""
+        def _first_last(sl: dict) -> tuple[dict, dict]:
+            segs = sl.get("segments") or []
+            if not segs:
+                return {}, {}
+            return segs[0], segs[-1]
+
+        # Outbound leg
+        first, last = _first_last(outbound_slice) if outbound_slice else ({}, {})
+        dep_iso = (
+            first.get("departing_at")
+            or first.get("depart_at")
+            or first.get("departure_time")
+            or ""
+        )
+        arr_iso = (
+            last.get("arriving_at")
+            or last.get("arrive_at")
+            or last.get("arrival_time")
+            or ""
+        )
 
         depart = _iso_to_local_hm(dep_iso) if dep_iso else ""
         arrive = _iso_to_local_hm(arr_iso) if arr_iso else ""
-        weekday, date_label = _weekday_date_from_iso(dep_iso or arr_iso or "")
+        weekday, outbound_date_only = _weekday_date_from_iso(dep_iso or arr_iso or "")
 
-        org = ((first.get("origin") or {}).get("iata_code") if isinstance(first.get("origin"), dict) else first.get("origin")) or ""
-        dst = ((last.get("destination") or {}).get("iata_code") if isinstance(last.get("destination"), dict) else last.get("destination")) or ""
+        org = (
+            (first.get("origin") or {}).get("iata_code")
+            if isinstance(first.get("origin"), dict)
+            else first.get("origin")
+        ) or ""
+        dst = (
+            (last.get("destination") or {}).get("iata_code")
+            if isinstance(last.get("destination"), dict)
+            else last.get("destination")
+        ) or ""
 
+        # Inbound leg (if present)
+        ret_depart = ret_arrive = ""
+        ret_route = ""
+        ret_weekday = ""
+        ret_date_only = ""
+        if return_slice:
+            r_first, r_last = _first_last(return_slice)
+            r_dep_iso = (
+                r_first.get("departing_at")
+                or r_first.get("depart_at")
+                or r_first.get("departure_time")
+                or ""
+            )
+            r_arr_iso = (
+                r_last.get("arriving_at")
+                or r_last.get("arrive_at")
+                or r_last.get("arrival_time")
+                or ""
+            )
+
+            ret_depart = _iso_to_local_hm(r_dep_iso) if r_dep_iso else ""
+            ret_arrive = _iso_to_local_hm(r_arr_iso) if r_arr_iso else ""
+            ret_weekday, ret_date_only = _weekday_date_from_iso(r_dep_iso or r_arr_iso or "")
+
+            r_org = (
+                (r_first.get("origin") or {}).get("iata_code")
+                if isinstance(r_first.get("origin"), dict)
+                else r_first.get("origin")
+            ) or ""
+            r_dst = (
+                (r_last.get("destination") or {}).get("iata_code")
+                if isinstance(r_last.get("destination"), dict)
+                else r_last.get("destination")
+            ) or ""
+
+            ret_route = f"{r_org}–{r_dst}" if r_org and r_dst else ""
+
+            # Remember return date for meta
+            if not return_date_str and ret_date_only:
+                return_date_str = ret_date_only
+
+        # Fill meta origin/destination from outbound only
         if not origin and org:
             origin = org
         if not destination and dst:
             destination = dst
-        if not date_str and date_label:
-            date_str = date_label
+        if not date_str and outbound_date_only:
+            date_str = outbound_date_only
 
-        route = f"{org}–{dst}" if org and dst else ""
+        # --- Route + date display ---
+        # One-way: "SYD–MEL"
+        # Round-trip: "SYD–MEL / MEL–SYD"
+        if org and dst:
+            route = f"{org}–{dst}"
+            if ret_route:
+                route = f"{route} / {ret_route}"
+        else:
+            route = ""
 
-        total_mins = (item.get("total_journey_duration_minutes") or item.get("total_duration_minutes"))
+        # One-way: "22 Dec"
+        # Round-trip: "22 Dec → 27 Dec"
+        date_display = outbound_date_only
+        if ret_date_only and ret_date_only != outbound_date_only:
+            date_display = f"{outbound_date_only} → {ret_date_only}"
+
+        # --- Duration: use outbound slice duration, NOT whole-trip total ---
+        total_mins = None
+        if isinstance(outbound_slice, dict):
+            total_mins = (
+                outbound_slice.get("journey_duration_minutes")
+                or outbound_slice.get("duration_minutes")
+            )
+
         if total_mins is None:
-            dur_txt = item.get("total_journey_duration") or item.get("total_duration") or sl.get("duration") or ""
+            dur_txt = (
+                (outbound_slice.get("duration") if isinstance(outbound_slice, dict) else "")
+                or item.get("total_journey_duration")
+                or item.get("total_duration")
+                or ""
+            )
             m1 = re.search(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?", (dur_txt or "").lower())
             if m1 and (m1.group(1) or m1.group(2)):
-                h = int(m1.group(1) or 0); m = int(m1.group(2) or 0)
+                h = int(m1.group(1) or 0)
+                m = int(m1.group(2) or 0)
                 total_mins = h * 60 + m
             else:
-                hh = re.search(r"(\d+)H", dur_txt); mm = re.search(r"(\d+)M", dur_txt)
-                total_mins = (int(hh.group(1)) * 60 if hh else 0) + (int(mm.group(1)) if mm else 0)
+                hh = re.search(r"(\d+)H", dur_txt)
+                mm = re.search(r"(\d+)M", dur_txt)
+                total_mins = (
+                    (int(hh.group(1)) * 60 if hh else 0)
+                    + (int(mm.group(1)) if mm else 0)
+                )
                 if total_mins == 0:
                     total_mins = None
 
@@ -333,18 +512,31 @@ def _normalize_any_to_flights(data: dict) -> dict:
             "id": offer_id,
             "airlineShort": airline,
             "airlineLogo": airline_logo,
-            "weekday": weekday,
-            "date": date_label,
+            "weekday": weekday,              # e.g. "Mon"
+            "date": date_display,            # e.g. "22 Dec" or "22 Dec → 27 Dec"
             "depart": depart,
             "arrive": arrive,
             "route": route,
             "duration": _duration_label(total_mins),
             "highlight": bool(item.get("highlight")) or (i == 0),
+
+            # Extra fields for return leg (if any)
+            "returnWeekday": ret_weekday,    # e.g. "Sat"
+            "returnDate": ret_date_only,     # e.g. "27 Dec"
+            "returnDepart": ret_depart,
+            "returnArrive": ret_arrive,
+            "returnRoute": ret_route,
         })
 
     return {
         "flights": norm,
-        "meta": {"total": len(norm), "origin": origin, "destination": destination, "date": date_str},
+        "meta": {
+            "total": len(norm),
+            "origin": origin,
+            "destination": destination,
+            "date": date_str or None,
+            "return_date": return_date_str or None,
+        },
     }
 
 def _format_price(amount: Any, currency: str | None) -> Tuple[str, float | None, str | None]:
@@ -846,7 +1038,8 @@ async def _list_tools() -> List[types.Tool]:
                             "type": "object",
                             "properties": {
                                 "given_name": {"type": "string"},
-                                "family_name": {"type": "string"}
+                                "family_name": {"type": "string"},
+                                "phone_number": {"type": "string"}
                             },
                             "required": ["given_name", "family_name"]
                         },
@@ -866,6 +1059,7 @@ async def _list_tools() -> List[types.Tool]:
                 "openai/widgetAccessible": True,
                 "openai/toolInvocation/invoking": "Preparing Stripe Checkout…",
                 "openai/toolInvocation/invoked": "Stripe Checkout ready.",
+                "openai/outputTemplate": PAYMENT.template_uri
             },
         ),
         types.Tool(
@@ -992,10 +1186,11 @@ async def _list_tools() -> List[types.Tool]:
                 "additionalProperties": True,
             },
             _meta={
-                "openai/resultCanProduceWidget": False,
+                "openai/resultCanProduceWidget": True,    # ⬅️ now true
+                "openai/widgetAccessible": True,
                 "openai/toolInvocation/invoking": "Preparing Stripe Checkout…",
                 "openai/toolInvocation/invoked": "Stripe Checkout ready.",
-                "openai/widgetAccessible": True,
+                "openai/outputTemplate": PAYMENT.template_uri,  # ⬅️ point at PaymentCard
             },
         ),
         # --- Post-booking flights ---
@@ -1137,6 +1332,37 @@ async def _list_tools() -> List[types.Tool]:
                 "openai/toolInvocation/invoked": "Airline-initiated changes listed.",
             },
         ),
+
+                types.Tool(
+            name="confirm_booking_from_ctx",
+            title="Confirm a paid checkout and thank the user",
+            description=(
+                "Given a checkout ctx_id that has status=paid in CHECKOUT_STATUS, "
+                "returns a concise confirmation and thank-you message. "
+                "Use this after Stripe payment is complete."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ctx_id": {
+                        "type": "string",
+                        "description": (
+                            "Checkout context id returned by start_hotel_checkout "
+                            "or start_flight_checkout."
+                        ),
+                    },
+                },
+                "required": ["ctx_id"],
+                "additionalProperties": False,
+            },
+            _meta={
+                "openai/resultCanProduceWidget": False,
+                "openai/widgetAccessible": True,
+                "openai/toolInvocation/invoking": "Finalising booking confirmation…",
+                "openai/toolInvocation/invoked": "Booking confirmation ready.",
+            },
+        ),
+
 
         types.Tool(
             name="accept_airline_initiated_change_tool",
@@ -1310,6 +1536,37 @@ async def _list_tools() -> List[types.Tool]:
                 "openai/widgetAccessible": True,
                 "openai/toolInvocation/invoking": "Requesting hotel stay extension…",
                 "openai/toolInvocation/invoked": "Hotel stay extension response received.",
+            },
+        ),
+
+        types.Tool(
+            name="show_payment_status_ui",
+            title="Show payment status (render PaymentCard)",
+            description=(
+                "Render a live payment status card for a given checkout ctx_id. "
+                "Use this after start_hotel_checkout or start_flight_checkout to "
+                "show whether payment is pending or paid."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ctx_id": {
+                        "type": "string",
+                        "description": (
+                            "Checkout context id returned by start_hotel_checkout "
+                            "or start_flight_checkout."
+                        ),
+                    },
+                },
+                "required": ["ctx_id"],
+                "additionalProperties": False,
+            },
+            _meta={
+                "openai/resultCanProduceWidget": True,
+                "openai/widgetAccessible": True,
+                "openai/toolInvocation/invoking": "Showing payment status…",
+                "openai/toolInvocation/invoked": "Payment status card rendered.",
+                "openai/outputTemplate": PAYMENT.template_uri,
             },
         ),
 
@@ -1789,7 +2046,7 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                 _meta=meta,
             ))
 
-                # Hotels UI
+        # Hotels UI
         if name == "search_hotels_ui":
             global BLOCK_NEXT_HOTEL_SEARCH
 
@@ -1936,6 +2193,88 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                 )
             )
 
+        if name == "confirm_booking_from_ctx":
+            ctx_id = (args.get("ctx_id") or "").strip()
+            if not ctx_id:
+                return error_result("ctx_id is required")
+
+            entry = CHECKOUT_STATUS.get(ctx_id)
+            if not entry:
+                return error_result(f"No checkout status found for ctx_id={ctx_id}")
+
+            if entry.get("status") != "paid":
+                return error_result(
+                    f"Checkout for ctx_id={ctx_id} is not marked as paid yet "
+                    f"(current status: {entry.get('status', 'unknown')})."
+                )
+
+            t = entry.get("type") or "hotel"
+            is_flight = (t == "flight")
+
+            amount = entry.get("amount")
+            ccy = entry.get("currency")
+            booking = entry.get("booking") or {}
+            bdata = booking.get("data") or booking
+
+            ref = (
+                bdata.get("booking_reference")
+                or bdata.get("reference")
+                or bdata.get("id")
+                or "confirmed_booking"
+            )
+
+            hotel_name = (
+                entry.get("hotel_name")
+                or bdata.get("hotel_name")
+                or (bdata.get("accommodation") or {}).get("name")
+                or None
+            )
+            room_name = (
+                entry.get("room_name")
+                or bdata.get("room_name")
+                or bdata.get("room_type")
+                or None
+            )
+
+            if is_flight:
+                title = "✈️ Your flight booking is confirmed."
+            else:
+                title = "🏨 Your hotel booking is confirmed."
+
+            parts = [title]
+
+            if hotel_name and not is_flight:
+                parts.append(f"Hotel: {hotel_name}")
+            if room_name and not is_flight:
+                parts.append(f"Room: {room_name}")
+            parts.append(f"Booking reference: {ref}")
+
+            if amount is not None and ccy:
+                try:
+                    amt_f = float(amount)
+                    parts.append(f"Paid: {ccy} {amt_f:.2f}")
+                except Exception:
+                    parts.append(f"Paid: {ccy} {amount}")
+
+            msg = (
+                "\n".join(parts)
+                + "\n\n"
+                + "Thank you for booking with BookedAI! "
+                  "If you’d like, I can help you review the details or make changes."
+            )
+
+            return types.ServerResult(types.CallToolResult(
+                content=[types.TextContent(type="text", text=msg)],
+                structuredContent={
+                    "ctx_id": ctx_id,
+                    "status": "paid",
+                    **entry,
+                },
+                _meta={
+                    "openai/resultCanProduceWidget": False,
+                    "openai/widgetAccessible": True,
+                },
+            ))
 
               
         # Room rates UI
@@ -2042,7 +2381,34 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                 _meta=meta,
             ))
         # --- Start hotel payment WITHOUT graph: just build Stripe Checkout and show link in chat ---
+                # --- Start hotel payment WITHOUT graph: just build Stripe Checkout and show link in chat ---
         if name == "start_hotel_checkout":
+            global BLOCK_NEXT_HOTEL_CHECKOUT
+
+            # One-shot guard: if the widget told us the user already completed / confirmed,
+            # do NOT start checkout again or re-embed the widget.
+            if BLOCK_NEXT_HOTEL_CHECKOUT:
+                BLOCK_NEXT_HOTEL_CHECKOUT = False  # consume the token
+                log.info("start_hotel_checkout one-shot block triggered")
+                return types.ServerResult(types.CallToolResult(
+                    content=[types.TextContent(
+                        type="text",
+                        text=(
+                            "Hotel checkout was blocked because the user already completed payment "
+                            "and confirmed the booking in the payment widget.\n\n"
+                            "Do NOT call `start_hotel_checkout` again for this booking.\n"
+                            "Instead, call `confirm_booking_from_ctx` with the same ctx_id to "
+                            "finalise the booking and send a final thank-you message."
+                        ),
+                    )],
+                    structuredContent={"skipped": True, "reason": "widget_payment_confirm"},
+                    isError=True,
+                    _meta={
+                        "openai/widgetAccessible": True,
+                    },
+                ))
+
+            # 🔽 original logic stays the same from here down
             rate_id  = (args.get("rate_id") or "").strip()
             email    = (args.get("email") or "").strip()
             guests   = args.get("guests") or []
@@ -2067,9 +2433,17 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                     content=[types.TextContent(type="text", text=f"Missing required fields: {', '.join(missing)}")],
                     isError=True,
                 ))
+            # 🔒 Email format validation
             if not EMAIL_RE.match(email):
                 return types.ServerResult(types.CallToolResult(
                     content=[types.TextContent(type="text", text="Invalid email format")],
+                    isError=True,
+                ))
+
+            # 🔒 Phone format validation
+            if not _is_valid_phone(phone):
+                return types.ServerResult(types.CallToolResult(
+                    content=[types.TextContent(type="text", text="Invalid phone number format")],
                     isError=True,
                 ))
 
@@ -2103,10 +2477,19 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
             checkout_url = f"{public_base}/checkout/link?ctx_id={ctx_id}"
 
             payload = {
+                "status": {
+                    "type": "hotel",
+                    "status": "pending",
+                    "ctx_id": ctx_id,
+                    "created_at": CHECKOUT_STATUS[ctx_id]["created_at"],
+                    "email": email,
+                    "hotel_name": hotel,
+                    "room_name": room,
+                },
                 "payment": {
                     "mode": "stripe_checkout_only",
                     "stripe_checkout_url": checkout_url,
-                    "ctx_id": ctx_id,  #  so the client can later call get_checkout_status
+                    "ctx_id": ctx_id,  #  so the widget (and tools) can track status
                 },
                 "metadata": {
                     "hotel_name": hotel,
@@ -2118,18 +2501,34 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                 }
             }
 
+            # 👇 embed the PaymentCard widget directly
+            w = PAYMENT
+            res = _embedded_widget_resource(w)
+            meta = {
+                "openai.com/widget": res.model_dump(mode="json"),
+                "openai/outputTemplate": w.template_uri,
+                "openai/toolInvocation/invoking": "Preparing Stripe Checkout…",
+                "openai/toolInvocation/invoked": "Stripe Checkout ready.",
+                "openai/widgetAccessible": True,
+                "openai/resultCanProduceWidget": True,
+            }
+
             return types.ServerResult(types.CallToolResult(
                 content=[
-                    types.TextContent(type="text", text=f"Open secure checkout:\n{checkout_url}"),
-                    types.TextContent(type="text", text=f"[Open secure checkout]({checkout_url})"),
+                    res,  # mounts the PaymentCard widget
+                    types.TextContent(
+                        type="text",
+                        text=f"Open secure checkout:\n{checkout_url}"
+                    ),
+                    types.TextContent(
+                        type="text",
+                        text=f"[Open secure checkout]({checkout_url})"
+                    ),
                 ],
                 structuredContent=payload,
-                _meta={
-                    "openai/resultCanProduceWidget": False,
-                    "openai/toolInvocation/invoking": "Preparing Stripe Checkout…",
-                    "openai/toolInvocation/invoked": "Stripe Checkout ready.",
-                },
+                _meta=meta,
             ))
+
 
         # --- Finalize after Stripe success: verify + complete booking, return details (standalone) ---
         if name == "finalize_hotel_checkout":
@@ -2309,6 +2708,31 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
 
 
         if name == "start_flight_checkout":
+            global BLOCK_NEXT_FLIGHT_CHECKOUT
+
+            # One-shot guard: if the widget told us the user already completed / confirmed,
+            # do NOT start checkout again or re-embed the widget.
+            if BLOCK_NEXT_FLIGHT_CHECKOUT:
+                BLOCK_NEXT_FLIGHT_CHECKOUT = False  # consume the token
+                log.info("start_flight_checkout one-shot block triggered")
+                return types.ServerResult(types.CallToolResult(
+                    content=[types.TextContent(
+                        type="text",
+                        text=(
+                            "Flight checkout was blocked because the user already completed payment "
+                            "and confirmed the booking in the payment widget.\n\n"
+                            "Do NOT call `start_flight_checkout` again for this booking.\n"
+                            "Instead, call `confirm_booking_from_ctx` with the same ctx_id to "
+                            "finalise the booking and send a final thank-you message."
+                        ),
+                    )],
+                    structuredContent={"skipped": True, "reason": "widget_payment_confirm_flight"},
+                    isError=True,
+                    _meta={
+                        "openai/widgetAccessible": True,
+                    },
+                ))
+
             offer_id = (args.get("offer_id") or "").strip()
             passengers = args.get("passengers") or []
             email = (args.get("email") or "").strip()
@@ -2345,6 +2769,10 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                 missing.append("phone_number")
             if missing:
                 return error_result(f"Missing/invalid fields: {', '.join(missing)}")
+            
+            # 🔒 Phone format validation (only reached if it’s present)
+            if not _is_valid_phone(phone):
+                return error_result("Invalid phone number format")
 
             # --- Re-confirm base price & currency from Duffel (prevents stale UI amounts) ---
             try:
@@ -2448,14 +2876,13 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
             }
 
             CHECKOUT_STATUS[ctx_id] = {
-                    "type": "flight",
-                    "status": "pending",
-                    "created_at": time(),
-                    "currency": currency,
-                    "amount": float(amount),
-                    "email": email,
-                  }
-
+                "type": "flight",
+                "status": "pending",
+                "created_at": time(),
+                "currency": currency,
+                "amount": float(amount),
+                "email": email,
+            }
 
             public_base = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
             checkout_url = f"{public_base}/flight/checkout/link?ctx_id={ctx_id}"
@@ -2464,8 +2891,52 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
             if services:
                 seat_text = f" (including seat selection total {currency} {seat_total:.2f})"
 
+            # 🔹 Build status payload for the widget
+            status_payload = {
+                "type": "flight",
+                "status": "pending",
+                "ctx_id": ctx_id,
+                "created_at": CHECKOUT_STATUS[ctx_id]["created_at"],
+                "currency": currency,
+                "amount": float(amount),
+                "email": email,
+            }
+
+            # 🔹 Full payload (same shape as hotel checkout)
+            payload = {
+                "status": status_payload,
+                "payment": {
+                    "mode": "stripe_checkout_only",
+                    "currency": currency,
+                    "amount": f"{amount:.2f}",
+                    "stripe_checkout_url": checkout_url,
+                    "ctx_id": ctx_id,
+                },
+                "metadata": {
+                    "offer_id": offer_id,
+                    "email": email,
+                    "phone_number": phone,
+                    "passengers_count": len(pax),
+                    "services_count": len(services),
+                    "seat_preference": seat_pref or "none",
+                },
+            }
+
+            # 🔹 Embed the PaymentCard widget (same as hotel)
+            w = PAYMENT
+            res = _embedded_widget_resource(w)
+            meta = {
+                "openai.com/widget": res.model_dump(mode="json"),
+                "openai/outputTemplate": w.template_uri,
+                "openai/toolInvocation/invoking": "Preparing Stripe Checkout…",
+                "openai/toolInvocation/invoked": "Stripe Checkout ready.",
+                "openai/widgetAccessible": True,
+                "openai/resultCanProduceWidget": True,
+            }
+
             return types.ServerResult(types.CallToolResult(
                 content=[
+                    res,  # mounts the PaymentCard widget
                     types.TextContent(
                         type="text",
                         text=f"Pay {currency} {amount:.2f}{seat_text} via Stripe Checkout:\n{checkout_url}",
@@ -2475,47 +2946,10 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                         text=f"[Open secure checkout]({checkout_url})",
                     ),
                 ],
-                structuredContent={
-                    "payment": {
-                        "mode": "stripe_checkout_only",
-                        "currency": currency,
-                        "amount": f"{amount:.2f}",
-                        "stripe_checkout_url": checkout_url,
-                        "ctx_id": ctx_id,  # ⬅️ for get_checkout_status
-                    },
-                    "metadata": {
-                        "offer_id": offer_id,
-                        "email": email,
-                        "phone_number": phone,
-                        "passengers_count": len(pax),
-                        "services_count": len(services),
-                        "seat_preference": seat_pref or "none",
-                    },
-                },
+                structuredContent=payload,
+                _meta=meta,
             ))
-        
-        # --- Post-booking flights ---
-        if name == "cancel_flight_booking_tool":
-            order_id = (args.get("order_id") or "").strip()
-            proceed = bool(args.get("proceed_despite_warnings") or False)
-            if not order_id:
-                return error_result("order_id is required")
 
-            raw = await cancel_flight_booking_tool.ainvoke({
-                "order_id": order_id,
-                "proceed_despite_warnings": proceed,
-            })
-            text, structured = _normalize_tool_result(raw)
-            return types.ServerResult(types.CallToolResult(
-                content=[types.TextContent(type="text", text=text)],
-                structuredContent=structured,
-                _meta={
-                    "openai/resultCanProduceWidget": False,
-                    "openai/widgetAccessible": True,
-                    "openai/toolInvocation/invoking": "Requesting flight cancellation…",
-                    "openai/toolInvocation/invoked": "Flight cancellation response received.",
-                },
-            ))
 
         if name == "change_flight_booking_tool":
             order_id = (args.get("order_id") or "").strip()
@@ -2823,7 +3257,57 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
                     "openai/widgetAccessible": True,
                 },
             ))
-        
+        if name == "show_payment_status_ui":
+            ctx_id = (args.get("ctx_id") or "").strip()
+            if not ctx_id:
+                return error_result("ctx_id is required")
+
+            entry = CHECKOUT_STATUS.get(ctx_id)
+            if not entry:
+                status = {
+                    "status": "unknown",
+                    "ctx_id": ctx_id,
+                }
+                msg = f"No checkout status found yet for ctx_id={ctx_id}."
+            else:
+                status = dict(entry)
+                status["ctx_id"] = ctx_id
+                msg = (
+                    f"Showing payment status card for ctx_id={ctx_id} "
+                    f"(status: {status.get('status', 'unknown')})."
+                )
+
+            # This is what the widget will see as toolOutput
+            payload = {
+                "status": status,
+                "payment": {
+                    "ctx_id": ctx_id,
+                    # you can add more if needed later (e.g. stripe_checkout_url)
+                },
+            }
+
+            w = PAYMENT
+            res = _embedded_widget_resource(w)
+            meta = {
+                "openai.com/widget": res.model_dump(mode="json"),
+                "openai/outputTemplate": w.template_uri,
+                "openai/toolInvocation/invoking": "Showing payment status…",
+                "openai/toolInvocation/invoked": "Payment status card rendered.",
+                "openai/widgetAccessible": True,
+                "openai/resultCanProduceWidget": True,
+            }
+
+            return types.ServerResult(
+                types.CallToolResult(
+                    content=[
+                        res,  # mounts payment-card widget
+                        types.TextContent(type="text", text=msg),
+                    ],
+                    structuredContent=payload,
+                    _meta=meta,
+                )
+            )
+
 
         # --- Get seat maps (no UI) ---
         if name == "get_seat_maps_tool":
@@ -2879,6 +3363,8 @@ async def _call_tool_request(req: types.CallToolRequest) -> types.ServerResult:
             content=[types.TextContent(type="text", text=f"Unknown tool: {name}")],
             isError=True,
         ))
+    
+    
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -3016,7 +3502,11 @@ async def success_route(request: Request):
         paid = Decimal(ses_amt) / (1 if ses_ccy in ZERO_DECIMAL else 100)
 
         # Record status for MCP polling / chat notification
+        # Keep any pending metadata (hotel_name, room_name, etc.)
+        prev = CHECKOUT_STATUS.get(ctx_id, {})
+
         CHECKOUT_STATUS[ctx_id] = {
+            **prev,
             "type": "hotel",
             "status": "paid",
             "created_at": time(),
@@ -3028,6 +3518,7 @@ async def success_route(request: Request):
             "receipt_url": receipt_url,
             "email": email,
         }
+
 
         html = f"""
         <!doctype html>
@@ -3300,6 +3791,65 @@ async def widget_block_next_room_rates(request: Request):
     return PlainTextResponse("ok")
 
 
+async def widget_checkout_status(request: Request):
+    """
+    GET /widget/checkout/status?ctx_id=...
+
+    Used by the payment-card widget to poll the current payment/booking status.
+    Reads CHECKOUT_STATUS[ctx_id] and returns it as JSON.
+    """
+    ctx_id = (request.query_params.get("ctx_id") or "").strip()
+    if not ctx_id:
+        return JSONResponse({"status": "error", "message": "Missing ctx_id"}, status_code=400)
+
+    entry = CHECKOUT_STATUS.get(ctx_id)
+    if not entry:
+        status = {"status": "unknown", "ctx_id": ctx_id}
+    else:
+        status = dict(entry)
+        status["ctx_id"] = ctx_id  # ensure ctx_id is always present
+
+    return JSONResponse(status)
+
+async def widget_block_next_hotel_checkout(request: Request):
+    """
+    POST /widget/hotel_checkout/block_next
+
+    Called by the payment widget AFTER the user has completed payment
+    and pressed the confirm/OK button in the dialog.
+
+    It sets a one-shot flag so the *next* start_hotel_checkout call is blocked.
+    """
+    global BLOCK_NEXT_HOTEL_CHECKOUT
+    try:
+        await request.body()  # we ignore any body
+    except Exception:
+        pass
+
+    BLOCK_NEXT_HOTEL_CHECKOUT = True
+    log.info("BLOCK_NEXT_HOTEL_CHECKOUT set to True by widget")
+    return PlainTextResponse("ok")
+
+async def widget_block_next_flight_checkout(request: Request):
+    """
+    POST /widget/flight_checkout/block_next
+
+    Called by the payment widget AFTER the user has completed payment
+    and pressed the confirm/OK button in the dialog (for flight flows).
+
+    It sets a one-shot flag so the *next* start_flight_checkout call is blocked.
+    """
+    global BLOCK_NEXT_FLIGHT_CHECKOUT
+    try:
+        await request.body()  # ignore body
+    except Exception:
+        pass
+
+    BLOCK_NEXT_FLIGHT_CHECKOUT = True
+    log.info("BLOCK_NEXT_FLIGHT_CHECKOUT set to True by widget")
+    return PlainTextResponse("ok")
+
+
 
     
 app.router.routes.append(Route("/checkout",      checkout_post_route, methods=["POST"]))
@@ -3320,10 +3870,19 @@ app.router.routes.append(
 app.router.routes.append(
     Route("/widget/room/block_next", widget_block_next_room_rates, methods=["POST"])
 )
+app.router.routes.append(
+    Route("/widget/hotel_checkout/block_next", widget_block_next_hotel_checkout, methods=["POST"])
+)
+
+app.router.routes.append(
+    Route("/widget/flight_checkout/block_next", widget_block_next_flight_checkout, methods=["POST"])
+)
 
 
-
-
+# 🔹 ADD THIS:
+app.router.routes.append(
+    Route("/widget/checkout/status", widget_checkout_status, methods=["GET"])
+)
 
 if __name__ == "__main__":
     import uvicorn

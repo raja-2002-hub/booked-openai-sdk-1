@@ -225,12 +225,6 @@ function Chip({ children, kind = "neutral", title }) {
 }
 
 /* -------------------- Room Card -------------------- */
-/**
- * UI: card-style, similar to hotel card.
- * Behaviour:
- *  - clicking anywhere on the card calls onBookClick(r)
- *  - clicking the "booking with Stripe" button also calls onBookClick(r)
- */
 function RoomCard({ r, onBookClick, disabled }) {
   const isRefundable = /refund|free|cancell/i.test(r.cancellation || "");
 
@@ -240,7 +234,7 @@ function RoomCard({ r, onBookClick, disabled }) {
   };
 
   const handlePrimaryClick = (e) => {
-    e.stopPropagation(); // avoid double-trigger (card + button)
+    e.stopPropagation();
     if (disabled) return;
     onBookClick(r);
   };
@@ -253,7 +247,7 @@ function RoomCard({ r, onBookClick, disabled }) {
       onClick={handleCardClick}
       role="button"
       tabIndex={0}
-      title={disabled ? "Selection already sent" : "Select this room"}
+      title={disabled ? "Processing selection..." : "Select this room"}
     >
       {r.highlight && (
         <div className="rc-ribbon" aria-hidden="true">
@@ -273,7 +267,6 @@ function RoomCard({ r, onBookClick, disabled }) {
         </div>
       </div>
 
-      {/* Media rail – visually similar to a rich image area like the hotel card hero */}
       <HoverZoomStrip photos={r.photos} />
 
       <div className="rc-chips">
@@ -322,7 +315,6 @@ function RoomCard({ r, onBookClick, disabled }) {
 function App() {
   const toolOutput = useOpenAiGlobal("toolOutput");
 
-  // 🔹 Freeze rooms after selection (like frozenFlights in FlightCard)
   const [frozenRooms, setFrozenRooms] = useState(null);
 
   const rooms = useMemo(() => {
@@ -374,7 +366,7 @@ function App() {
     };
   }, [rooms.length]);
 
-  // 🔹 Reset frozen state when we get a *completely new* set of rooms (different IDs)
+  // Reset frozen state when we get completely new rooms
   useEffect(() => {
     if (frozenRooms && toolOutput) {
       const newRooms = coerceRooms(toolOutput || {});
@@ -386,6 +378,7 @@ function App() {
           [...newIds].some((id) => !oldIds.has(id));
 
         if (isDifferent) {
+          console.log('✅ Room card: Unfreezing - new rooms detected');
           setFrozenRooms(null);
           setPicked(null);
           setSending(false);
@@ -408,10 +401,16 @@ function App() {
     el.scrollBy({ left: (cardWidth + gap) * dir, behavior: "smooth" });
   };
 
-  // Click handler: send follow-up to ChatGPT, similar to FlightCard
+  // ✅ FIXED: Removed || sentOnce from the guard
   async function handleBookClick(rate) {
-    // prevent double-click spam
-    if (sending || sentOnce) return;
+    // Only block during active sending (NOT after sentOnce)
+    if (sending) return;
+
+    console.log('🏨 Room selected', {
+      rateId: rate.id,
+      isFrozen: !!frozenRooms,
+      sending: sending
+    });
 
     const roomInfo = {
       rate_id: rate.id,
@@ -428,70 +427,70 @@ function App() {
       search_result_id: srr,
     };
 
-      const promptLines = [
-    "I just selected this specific room in the RoomCard widget and I want to book it.",
-    "",
-    "Selected room / hotel details:",
-    `- Hotel name: ${roomInfo.hotel_name || "-"}`,
-    `- Location: ${roomInfo.hotel_location || "-"}`,
-    `- Room name: ${roomInfo.room_name || "-"}`,
-    `- Rate ID (rate_id): ${roomInfo.rate_id || "-"}`,
-    `- Price: ${roomInfo.price_label || "-"}`,
-    roomInfo.bed ? `- Bed: ${roomInfo.bed}` : null,
-    roomInfo.board ? `- Board: ${roomInfo.board}` : null,
-    roomInfo.cancellation
-      ? `- Cancellation: ${roomInfo.cancellation}`
-      : null,
-    roomInfo.search_result_id
-      ? `- search_result_id: ${roomInfo.search_result_id}`
-      : null,
-    "",
-    "Please do the following, step by step:",
-    "",
-    "1) First, call the `select_hotel_room_rate` tool with exactly this payload:",
-    "```json",
-    JSON.stringify(
-      {
-        rate_id: roomInfo.rate_id,
-        hotel_name: roomInfo.hotel_name,
-        hotel_location: roomInfo.hotel_location,
-        room_name: roomInfo.room_name,
-        search_result_id: roomInfo.search_result_id,
-        price_label: roomInfo.price_label,
-        price_amount: roomInfo.price_amount,
-        currency: roomInfo.currency,
-        bed: roomInfo.bed,
-        board: roomInfo.board,
-        cancellation: roomInfo.cancellation,
-        quantity: roomInfo.quantity,
-      },
-      null,
-      2
-    ),
-    "```",
-    "",
-    "2) After `select_hotel_room_rate` succeeds, in your reply confirm my selection in natural language and ask me for:",
-    "   - Guest names (given_name and family_name for each guest)",
-    "   - Contact email",
-    "   - Contact phone number",
-    "   - Any special requests for the stay",
-    "",
-    "3) Once you have these details from me, call the `start_hotel_checkout` tool with:",
-    `   - rate_id: ${roomInfo.rate_id || "(this room's rate_id)"}`,
-    `   - search_result_id: ${roomInfo.search_result_id || "(if available)"}`,
-    `   - hotel_name: ${roomInfo.hotel_name || "Hotel"}`,
-    `   - room_name: ${roomInfo.room_name || "Room"}`,
-    "   - guests: the guest objects you collected (with given_name and family_name)",
-    "   - email: the email I provided",
-    "   - phone_number: the phone number I provided",
-    "   - stay_special_requests: whatever special requests I provided (if any)",
-    "",
-    "4) After `start_hotel_checkout` returns, give me the Stripe Checkout link so I can finish payment in the browser.",
-  ].filter(Boolean);
+    const promptLines = [
+      "I just selected this specific room in the RoomCard widget and I want to book it.",
+      "",
+      "Selected room / hotel details:",
+      `- Hotel name: ${roomInfo.hotel_name || "-"}`,
+      `- Location: ${roomInfo.hotel_location || "-"}`,
+      `- Room name: ${roomInfo.room_name || "-"}`,
+      `- Rate ID (rate_id): ${roomInfo.rate_id || "-"}`,
+      `- Price: ${roomInfo.price_label || "-"}`,
+      roomInfo.bed ? `- Bed: ${roomInfo.bed}` : null,
+      roomInfo.board ? `- Board: ${roomInfo.board}` : null,
+      roomInfo.cancellation
+        ? `- Cancellation: ${roomInfo.cancellation}`
+        : null,
+      roomInfo.search_result_id
+        ? `- search_result_id: ${roomInfo.search_result_id}`
+        : null,
+      "",
+      "Please do the following, step by step:",
+      "",
+      "1) First, call the `select_hotel_room_rate` tool with exactly this payload:",
+      "```json",
+      JSON.stringify(
+        {
+          rate_id: roomInfo.rate_id,
+          hotel_name: roomInfo.hotel_name,
+          hotel_location: roomInfo.hotel_location,
+          room_name: roomInfo.room_name,
+          search_result_id: roomInfo.search_result_id,
+          price_label: roomInfo.price_label,
+          price_amount: roomInfo.price_amount,
+          currency: roomInfo.currency,
+          bed: roomInfo.bed,
+          board: roomInfo.board,
+          cancellation: roomInfo.cancellation,
+          quantity: roomInfo.quantity,
+        },
+        null,
+        2
+      ),
+      "```",
+      "",
+      "2) After `select_hotel_room_rate` succeeds, in your reply confirm my selection in natural language and ask me for:",
+      "   - Guest names (given_name and family_name for each guest)",
+      "   - Contact email",
+      "   - Contact phone number",
+      "   - Any special requests for the stay",
+      "",
+      "3) Once you have these details from me, call the `start_hotel_checkout` tool with:",
+      `   - rate_id: ${roomInfo.rate_id || "(this room's rate_id)"}`,
+      `   - search_result_id: ${roomInfo.search_result_id || "(if available)"}`,
+      `   - hotel_name: ${roomInfo.hotel_name || "Hotel"}`,
+      `   - room_name: ${roomInfo.room_name || "Room"}`,
+      "   - guests: the guest objects you collected (with given_name and family_name)",
+      "   - email: the email I provided",
+      "   - phone_number: the phone number I provided",
+      "   - stay_special_requests: whatever special requests I provided (if any)",
+      "",
+      "4) After `start_hotel_checkout` returns, give me the Stripe Checkout link so I can finish payment in the browser.",
+    ].filter(Boolean);
 
     const prompt = promptLines.join("\n");
 
-    // 🔹 Freeze the current rooms list BEFORE sending anything
+    // Freeze rooms list BEFORE sending
     setFrozenRooms(rooms);
 
     setPicked(roomInfo);
@@ -499,12 +498,10 @@ function App() {
     setSendError(null);
 
     try {
-      // Tell backend to block the *next* fetch_hotel_rates_ui, so the model
-      // doesn’t immediately re-call it for this same selection.
       await blockNextRoomRatesOnServer();
-
       await sendFollowUpMessage(prompt);
       setSentOnce(true);
+      console.log('✅ Room selection sent to assistant');
     } catch (e) {
       console.error("Error sending follow-up message", e);
       setSendError("Could not notify the assistant about this room selection.");
@@ -552,7 +549,7 @@ function App() {
               key={r.id}
               r={r}
               onBookClick={handleBookClick}
-              disabled={sending || sentOnce}
+              disabled={sending}
             />
           ))}
         </div>
@@ -635,7 +632,6 @@ function App() {
         </div>
       )}
 
-      {/* Diagnostics badge (dev only) */}
       <div className="rc-diagnostics" aria-hidden="true">
         caps:
         {caps.hasFollowUp ? " sendFollowUpMessage" : ""}
@@ -650,6 +646,5 @@ function App() {
   );
 }
 
-/* Mount */
 const mount = document.getElementById("room-card-root");
 if (mount) createRoot(mount).render(<App />);

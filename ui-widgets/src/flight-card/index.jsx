@@ -1,5 +1,4 @@
-﻿// ui-widgets/src/flight-card/index.jsx
-import React, {
+﻿import React, {
   useMemo,
   useState,
   useSyncExternalStore,
@@ -42,11 +41,9 @@ function hostCaps() {
 }
 
 /* -------- send follow-up (aligned with HotelCard) -------- */
-
 async function sendFollowUpMessage(prompt) {
   const oa = window.openai;
 
-  // 1) Preferred: sendFollowUpMessage
   try {
     if (oa?.sendFollowUpMessage) {
       await oa.sendFollowUpMessage({ prompt });
@@ -56,7 +53,6 @@ async function sendFollowUpMessage(prompt) {
     console.warn("sendFollowUpMessage failed", e);
   }
 
-  // 2) Fallback: appendUserMessage
   try {
     if (oa?.appendUserMessage) {
       await oa.appendUserMessage(prompt);
@@ -66,7 +62,6 @@ async function sendFollowUpMessage(prompt) {
     console.warn("appendUserMessage failed", e);
   }
 
-  // 3) Fallback: sendMessage
   try {
     if (oa?.sendMessage) {
       await oa.sendMessage({ role: "user", content: prompt });
@@ -76,7 +71,6 @@ async function sendFollowUpMessage(prompt) {
     console.warn("sendMessage failed", e);
   }
 
-  // 4) Dev fallbacks (outside ChatGPT)
   try {
     window.dispatchEvent(
       new CustomEvent("openai:append_user_message", {
@@ -103,9 +97,7 @@ async function sendFollowUpMessage(prompt) {
 
 /* -----------------------------------------
    Backend helper: one-shot block flag
-   (skip NEXT search_flights_ui after widget click)
 ------------------------------------------ */
-
 async function blockNextFlightSearchOnServer() {
   try {
     await fetch("http://localhost:8000/widget/flight/block_next", {
@@ -121,7 +113,6 @@ async function blockNextFlightSearchOnServer() {
 /* -----------------------------------------
    Helpers: map flights
 ------------------------------------------ */
-
 function mapFlights(output) {
   const src =
     (output && (output.flights || output.results)) ||
@@ -143,101 +134,381 @@ function mapFlights(output) {
       date: f.date || "",
       depart: f.depart || f.departure_time || "",
       arrive: f.arrive || f.arrival_time || "",
+      // Return leg
+      returnDepart:
+        f.returnDepart ||
+        f.return_depart ||
+        f.return_departure_time ||
+        "",
+      returnArrive:
+        f.returnArrive ||
+        f.return_arrive ||
+        f.return_arrival_time ||
+        "",
+      returnRoute: f.returnRoute || f.return_route || "",
+      returnDate:
+        f.returnDate ||
+        f.return_date ||
+        f.return_date_str ||
+        f.return_date_text ||
+        "",
+      returnWeekday: f.returnWeekday || f.return_weekday || "",
       route: f.route || "",
       duration: f.duration || "",
       highlight: !!f.highlight || i === 0,
+      price: f.price || "",
+      tax: f.tax || "",
+      flightNumber: f.flightNumber || f.flight_number || "",
+      stops: f.stops || "Non-stop",
+      cabin: f.cabin || "Economy",
+      baggage: f.baggage || "0 checked, 1 carry_on",
+      refunds: f.refunds || "Changeable",
     };
   });
 }
 
+/* -----------------------------------------
+   Formatting helpers to match TARGET
+------------------------------------------ */
+const ARROW = "→";
+
+function normalizeLegRoute(route) {
+  if (!route) return "";
+  let t = String(route).trim();
+
+  // normalize separators to arrow
+  t = t.replace(/\s*(→|->|—|–|-)\s*/g, ` ${ARROW} `);
+
+  // clean double spaces
+  t = t.replace(/\s+/g, " ").trim();
+
+  return t.toUpperCase();
+}
+
 /* --------------- UI bits --------------- */
 
-function DurationPill({ text, highlight }) {
+function DurationPill({ text, highlight, index }) {
   if (!text) return null;
+  const isGreen = index === 0 || highlight;
   return (
-    <span
-      className={
-        "fc-pill fc-pill--time " + (highlight ? "fc-pill--time-best" : "")
-      }
-    >
-      {text}
+    <span className={"fc-pill " + (isGreen ? "fc-pill--time" : "fc-pill--time-slow")}>
+      {String(text).trim()}
     </span>
   );
 }
 
-function BestPill({ show }) {
-  if (!show) return null;
-  return <span className="fc-pill fc-pill--best">Best</span>;
-}
-
 function AirlineBlock({ airline, logo }) {
   return (
-    <div className="fc-col fc-col-airline">
+    <>
       {logo ? (
         <img
           src={logo}
-          alt=""
+          alt={airline || "Airline"}
           className="fc-airline-logo"
           referrerPolicy="no-referrer"
         />
       ) : (
         <div className="fc-airline-logo fc-airline-logo--placeholder" />
       )}
-      <span className="fc-airline-name">{airline || "Airline"}</span>
-    </div>
+    </>
   );
 }
 
 function DateBlock({ weekday, date }) {
+  const stripYear = (str) =>
+    str ? str.replace(/(\s|,)*\d{4}\s*$/, "") : str;
+
+  let dateText = stripYear(date || "");
+
+  // If weekday not provided, try to infer from "Mon, Dec 22"
+  let wk = weekday || "";
+  if (!wk && typeof dateText === "string" && dateText.includes(",")) {
+    const maybe = dateText.split(",")[0].trim();
+    if (maybe && maybe.length <= 4) wk = maybe;
+  }
+
+  // If we have a weekday, remove it from the dateText (so it can render separately)
+  if (wk && dateText) {
+    const escaped = wk.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp("^" + escaped + ",?\\s*");
+    dateText = dateText.replace(re, "");
+  }
+
   return (
-    <div className="fc-col fc-col-date">
-      <div className="fc-date-line">
-        {weekday && <span className="fc-weekday">{weekday}</span>}
-        {date && <span className="fc-date">{date}</span>}
-      </div>
-      <div className="fc-departure-label">Departure</div>
+    <div className="fc-date-line" title={(wk ? wk + ", " : "") + (dateText || "")}>
+      {wk && <span className="fc-weekday">{wk}</span>}
+      {wk && dateText && <span>, </span>}
+      {dateText && <span className="fc-date">{dateText}</span>}
     </div>
   );
 }
 
-function TimesBlock({ depart, arrive, route }) {
-  const range =
-    depart && arrive ? `${depart} – ${arrive}` : depart || arrive || "—";
+/** Convert h:mm AM/PM → 24-hour HH:MM, or return cleaned string */
+function formatTimeTo24Hour(timeStr) {
+  if (!timeStr) return "";
+  const s = String(timeStr).trim();
+
+  if (s.includes("-")) {
+    const [start, end] = s.split("-").map((p) => p.trim());
+    const fs = formatTimeTo24Hour(start);
+    const fe = formatTimeTo24Hour(end);
+    if (fs && fe) return `${fs} - ${fe}`;
+    return s.replace(/\s*(AM|PM|am|pm)\s*$/, "");
+  }
+
+  const m = s.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM|am|pm))?$/);
+  if (!m) return s.replace(/\s*(AM|PM|am|pm)\s*$/, "");
+
+  let [, hStr, mStr, ampm] = m;
+  let h = parseInt(hStr, 10);
+
+  if (ampm) {
+    const upper = ampm.toUpperCase();
+    if (upper === "AM") {
+      if (h === 12) h = 0;
+    } else if (upper === "PM") {
+      if (h !== 12) h += 12;
+    }
+  }
+
+  const hh = String(h).padStart(2, "0");
+  return `${hh}:${mStr}`;
+}
+
+function TimesBlock({ depart, arrive }) {
+  const d = formatTimeTo24Hour(depart);
+  const a = formatTimeTo24Hour(arrive);
+  const range = d && a ? `${d} - ${a}` : d || a || "—";
+  return <span className="fc-time-range">{range}</span>;
+}
+
+function MoreInfoButton({ open, onToggle }) {
   return (
-    <div className="fc-col fc-col-times">
-      <div className="fc-time-range">{range}</div>
-      {route && <div className="fc-route">{route}</div>}
+    <button className="fc-more-info" onClick={onToggle} type="button">
+      {open ? "Less Info" : "More Info"}{" "}
+      <span className={`fc-chevron ${open ? "fc-chevron--open" : ""}`}>▼</span>
+    </button>
+  );
+}
+
+function PriceBlock({ price, tax, onSelect, disabled }) {
+  const displayPrice = price || "$161";
+  const displayTax = tax || "incl. $15 tax";
+
+  return (
+    <div className="fc-price-row">
+      <div className="fc-price-info">
+        <div className="fc-price-amount">{displayPrice}</div>
+        <div className="fc-price-tax">{displayTax}</div>
+      </div>
+      <button
+        type="button"
+        className="fc-select-btn"
+        onClick={onSelect}
+        disabled={disabled}
+      >
+        Select
+      </button>
     </div>
   );
 }
+
+function DetailsSection({ flight }) {
+  return (
+    <div className="fc-details-box">
+      <div className="fc-details">
+        <span className="fc-details-label">Airline:</span>
+        <span className="fc-details-value">{flight.airlineShort || "—"}</span>
+
+        <span className="fc-details-label">Flight Number:</span>
+        <span className="fc-details-value">{flight.flightNumber || "—"}</span>
+
+        <span className="fc-details-label">Stops:</span>
+        <span className="fc-details-value">{flight.stops || "Non-stop"}</span>
+
+        <span className="fc-details-label">Cabin:</span>
+        <span className="fc-details-value">{flight.cabin || "Economy"}</span>
+
+        <span className="fc-details-label">Baggage:</span>
+        <span className="fc-details-value">
+          {flight.baggage || "0 checked, 1 carry_on"}
+        </span>
+
+        <span className="fc-details-label">Refunds:</span>
+        <span className="fc-details-value">
+          {flight.refunds || "Changeable"}
+        </span>
+
+        <span className="fc-details-label">Duration:</span>
+        <span className="fc-details-value">{flight.duration || "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ------------ Flight card ------------ */
 
 function FlightCard({ f, index, onSelect, disabled }) {
+  // ✅ both expandable independently
+  const [showDepartureDetails, setShowDepartureDetails] = useState(false);
+  const [showReturnDetails, setShowReturnDetails] = useState(false);
+
   const isBest = !!f.highlight || index === 0;
 
-  return (
-    <button
-      type="button"
-      className={
-        "fc-card " + (isBest ? "fc-card--highlight" : "fc-card--normal")
-      }
-      onClick={() => onSelect(f, index)}
-      title={disabled ? "Selection already sent" : "Select this flight"}
-      disabled={disabled}
-    >
-      <div className="fc-card-top">
-        <DurationPill text={f.duration} highlight={isBest} />
-        <BestPill show={isBest} />
-      </div>
+  const hasReturnLeg = useMemo(() => {
+    const hasExplicit = !!(f.returnDepart || f.returnArrive || f.returnRoute || f.returnDate);
+    const hasRouteReturn = typeof f.route === "string" && f.route.includes("/");
+    const hasDateReturn = typeof f.date === "string" && f.date.includes("→");
+    return hasExplicit || hasRouteReturn || hasDateReturn;
+  }, [f.returnDepart, f.returnArrive, f.returnRoute, f.returnDate, f.route, f.date]);
 
-      <div className="fc-main">
-        <AirlineBlock airline={f.airlineShort} logo={f.airlineLogo} />
-        <DateBlock weekday={f.weekday} date={f.date} />
-        <TimesBlock depart={f.depart} arrive={f.arrive} route={f.route} />
-        <div className="fc-info">
-          <div className="fc-info-icon">i</div>
+  const { outboundDateRaw, returnDateRaw } = useMemo(() => {
+    const stripYear = (str) => (str ? str.replace(/\s*\d{4}\s*$/, "") : "");
+    const raw = f.date || "";
+    if (raw.includes("→")) {
+      const [out, ret] = raw.split("→").map((s) => stripYear(s.trim()));
+      return { outboundDateRaw: out, returnDateRaw: ret };
+    }
+    return { outboundDateRaw: stripYear(raw), returnDateRaw: stripYear(f.returnDate || "") };
+  }, [f.date, f.returnDate]);
+
+  const { outWeekday, outDate, retWeekday, retDate } = useMemo(() => {
+    const outW = f.weekday || "";
+    const outD = outboundDateRaw || "";
+
+    const rW = f.returnWeekday || "";
+    const rD = returnDateRaw || "";
+
+    return {
+      outWeekday: outW,
+      outDate: outD,
+      retWeekday: rW,
+      retDate: rD,
+    };
+  }, [f.weekday, outboundDateRaw, f.returnWeekday, returnDateRaw]);
+
+  const { outboundRouteDisplay, returnRouteDisplay } = useMemo(() => {
+    const full = (f.route || "").trim();
+    const explicitRet = (f.returnRoute || "").trim();
+
+    let out = full;
+    let retFromSlash = "";
+
+    if (full.includes("/")) {
+      const parts = full.split("/").map((s) => s.trim());
+      out = parts[0] || "";
+      retFromSlash = parts[1] || "";
+    }
+
+    const ret = explicitRet || retFromSlash;
+
+    return {
+      outboundRouteDisplay: normalizeLegRoute(out),
+      returnRouteDisplay: normalizeLegRoute(ret),
+    };
+  }, [f.route, f.returnRoute]);
+
+  const handleSelect = (e) => {
+    e.stopPropagation();
+    onSelect(f, index);
+  };
+
+  return (
+    <div className={"fc-card " + (isBest ? "fc-card--highlight" : "fc-card--normal")}>
+      <div className="fc-card-inner">
+        <div className="fc-card-header">
+          <DurationPill text={f.duration} highlight={isBest} index={index} />
+          {isBest && <span className="fc-best-pill">Best</span>}
+        </div>
+
+        {/* logo only */}
+        <div className="fc-airline-row">
+          <AirlineBlock airline={f.airlineShort} logo={f.airlineLogo} />
+        </div>
+
+        <div className="fc-divider" />
+
+        <div className="fc-legs">
+          {/* Departure row */}
+          <div className="fc-leg-row">
+            <div className="fc-leg-cell fc-leg-cell--date">
+              <DateBlock weekday={outWeekday} date={outDate} />
+              <div className="fc-leg-label">DEPARTURE</div>
+            </div>
+
+            <div className="fc-leg-cell fc-leg-cell--time">
+              <TimesBlock depart={f.depart} arrive={f.arrive} />
+              {outboundRouteDisplay && (
+                <div className="fc-leg-route">{outboundRouteDisplay}</div>
+              )}
+            </div>
+
+            <div className="fc-leg-cell fc-leg-cell--more">
+              <MoreInfoButton
+                open={showDepartureDetails}
+                onToggle={(e) => {
+                  e.stopPropagation();
+                  setShowDepartureDetails((v) => !v);
+                }}
+              />
+            </div>
+          </div>
+
+          {showDepartureDetails && (
+            <div className="fc-leg-details">
+              <DetailsSection flight={f} />
+            </div>
+          )}
+
+          {/* Return row */}
+          {hasReturnLeg && (
+            <>
+              <div className="fc-leg-row fc-leg-row--return">
+                <div className="fc-leg-cell fc-leg-cell--date">
+                  <DateBlock weekday={retWeekday} date={retDate} />
+                  <div className="fc-leg-label">RETURN</div>
+                </div>
+
+                <div className="fc-leg-cell fc-leg-cell--time">
+                  <TimesBlock
+                    depart={f.returnDepart || ""}
+                    arrive={f.returnArrive || ""}
+                  />
+                  {returnRouteDisplay && (
+                    <div className="fc-leg-route">{returnRouteDisplay}</div>
+                  )}
+                </div>
+
+                <div className="fc-leg-cell fc-leg-cell--more">
+                  <MoreInfoButton
+                    open={showReturnDetails}
+                    onToggle={(e) => {
+                      e.stopPropagation();
+                      setShowReturnDetails((v) => !v);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {showReturnDetails && (
+                <div className="fc-leg-details">
+                  <DetailsSection flight={f} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="fc-price-section">
+          <PriceBlock
+            price={f.price}
+            tax={f.tax}
+            onSelect={handleSelect}
+            disabled={disabled}
+          />
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -248,78 +519,80 @@ function App() {
   const toolMeta =
     useOpenAiGlobal("toolResponseMetadata") || toolOutput?.meta || {};
 
-  // 🔹 Freeze flights after selection (like frozenHotels in the hotel widget)
   const [frozenFlights, setFrozenFlights] = useState(null);
+  const [picked, setPicked] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [sentOnce, setSentOnce] = useState(false);
+  const [sendError, setSendError] = useState(null);
+
+  const scrollRef = React.useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const flights = useMemo(() => {
     if (frozenFlights) return frozenFlights;
     return mapFlights(toolOutput || {});
   }, [toolOutput, frozenFlights]);
 
-  const [picked, setPicked] = useState(null);
-  const [sending, setSending] = useState(false);
-  const [sentOnce, setSentOnce] = useState(false);
-  const [sendError, setSendError] = useState(null);
-  const [showAll, setShowAll] = useState(false);
-
   const caps = hostCaps();
 
-  // 🔹 Reset frozen state when we get a *completely new* set of flights
-  // CRITICAL: This effect MUST match hotel card behavior exactly
+  const updateScrollButtons = () => {
+    if (!scrollRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1);
+  };
+
   useEffect(() => {
-    // Only check if we have frozen flights AND new toolOutput
+    updateScrollButtons();
+    const scrollEl = scrollRef.current;
+    if (scrollEl) {
+      scrollEl.addEventListener("scroll", updateScrollButtons);
+      window.addEventListener("resize", updateScrollButtons);
+      return () => {
+        scrollEl.removeEventListener("scroll", updateScrollButtons);
+        window.removeEventListener("resize", updateScrollButtons);
+      };
+    }
+  }, [flights]);
+
+  const scroll = (direction) => {
+    if (!scrollRef.current) return;
+    const scrollAmount = 496; // unchanged
+    const newScrollLeft =
+      scrollRef.current.scrollLeft +
+      (direction === "left" ? -scrollAmount : scrollAmount);
+    scrollRef.current.scrollTo({ left: newScrollLeft, behavior: "smooth" });
+  };
+
+  // Reset frozen state when we get a completely new set of flights
+  useEffect(() => {
     if (!frozenFlights || !toolOutput) return;
 
     const newFlights = mapFlights(toolOutput);
-    
-    // Must have new flights to compare
     if (newFlights.length === 0) return;
 
     const newIds = new Set(newFlights.map((f) => f.id));
     const oldIds = new Set(frozenFlights.map((f) => f.id));
-    
-    // Check if sets are different (same logic as hotel card)
+
     const isDifferent =
       newIds.size !== oldIds.size ||
       ![...newIds].every((id) => oldIds.has(id));
 
     if (isDifferent) {
-      console.log('✅ Flight card: Unfreezing - New flight results detected', {
-        oldIds: Array.from(oldIds),
-        newIds: Array.from(newIds),
-        oldCount: oldIds.size,
-        newCount: newIds.size
-      });
-      
-      // Reset ALL state (exactly like hotel card)
+      console.log("✅ Flight card: Unfreezing - New flight results detected");
       setFrozenFlights(null);
       setPicked(null);
       setSending(false);
       setSentOnce(false);
       setSendError(null);
-      setShowAll(false);
-    } else {
-      console.log('⏸️ Flight card: Same flights, keeping frozen state');
     }
   }, [toolOutput, frozenFlights]);
 
-  const VISIBLE_INITIAL = 2;
-  const visibleFlights = showAll ? flights : flights.slice(0, VISIBLE_INITIAL);
-
   async function onSelectFlight(f, index) {
-    // prevent double-click spam - BUT allow new selections after reset
     if (sending) return;
 
-    console.log('🛫 Flight selected', {
-      flightId: f.id,
-      isFrozen: !!frozenFlights,
-      sentOnce: sentOnce
-    });
-
-    // 1) Tell backend to block the *next* search_flights_ui (one-shot)
     await blockNextFlightSearchOnServer();
-
-    // 2) Freeze the current flights list BEFORE sending anything
     setFrozenFlights(flights);
 
     const payload = {
@@ -351,9 +624,7 @@ function App() {
       `- Date: ${flightInfo.date || "-"}`,
       `- Departure time: ${flightInfo.departure_time || "-"}`,
       `- Arrival time: ${flightInfo.arrival_time || "-"}`,
-      flightInfo.duration
-        ? `- Duration: ${flightInfo.duration || "-"}`
-        : null,
+      flightInfo.duration ? `- Duration: ${flightInfo.duration || "-"}` : null,
       "",
       "Please do the following:",
       '1. In your reply, say something like: "You have selected this flight, I will proceed with booking steps now."',
@@ -368,7 +639,6 @@ function App() {
     try {
       await sendFollowUpMessage(prompt);
       setSentOnce(true);
-      console.log('✅ Flight selection sent to assistant');
     } catch (e) {
       console.error("Error sending follow-up message", e);
       setSendError("Could not notify the assistant about this selection.");
@@ -395,36 +665,62 @@ function App() {
         </div>
       </div>
 
-      <div className="fc-list" aria-label="Flight results">
-        {visibleFlights.map((f, idx) => (
-          <FlightCard
-            key={f.id || idx}
-            f={f}
-            index={idx}
-            onSelect={onSelectFlight}
-            disabled={sending}
-          />
-        ))}
-      </div>
-
       {!flights.length && (
         <div className="fc-empty">Waiting for flight results…</div>
       )}
 
-      {/* Show-all widget */}
-      {!showAll && flights.length > VISIBLE_INITIAL && (
-        <div className="fc-show-all-wrap">
-          <button
-            type="button"
-            className="fc-show-all-btn"
-            onClick={() => setShowAll(true)}
-          >
-            Show all {flights.length} Flights!
-          </button>
+      {flights.length > 0 && (
+        <div className="fc-scroll-container">
+          {canScrollLeft && (
+            <button
+              className="fc-scroll-arrow fc-scroll-arrow--left"
+              onClick={() => scroll("left")}
+              aria-label="Scroll left"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+          )}
+
+          <div className="fc-scroll-wrapper" ref={scrollRef}>
+            <div className="fc-list" aria-label="Flight results">
+              {flights.map((f, idx) => (
+                <FlightCard
+                  key={f.id || idx}
+                  f={f}
+                  index={idx}
+                  onSelect={onSelectFlight}
+                  disabled={sending}
+                />
+              ))}
+            </div>
+          </div>
+
+          {canScrollRight && (
+            <button
+              className="fc-scroll-arrow fc-scroll-arrow--right"
+              onClick={() => scroll("right")}
+              aria-label="Scroll right"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          )}
         </div>
       )}
 
-      {/* Selection bubble (like in hotels) */}
       {picked && (
         <div
           className={
@@ -466,7 +762,6 @@ function App() {
         </div>
       )}
 
-      {/* Diagnostics badge (dev only) */}
       <div className="fc-diagnostics" aria-hidden="true">
         caps:
         {caps.hasFollowUp ? " sendFollowUpMessage" : ""}

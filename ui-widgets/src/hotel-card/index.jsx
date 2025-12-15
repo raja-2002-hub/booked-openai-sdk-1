@@ -102,12 +102,10 @@ async function sendFollowUpMessage(prompt) {
 
 /* -----------------------------------------
    Backend helper: one-shot block flag
-   (skip NEXT search_hotels_ui after widget click)
 ------------------------------------------ */
 
 async function blockNextHotelSearchOnServer() {
   try {
-    // Use same base URL as PUBLIC_BASE_URL on the server
     await fetch("http://localhost:8000/widget/hotel/block_next", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,17 +188,59 @@ function mapHotels(output) {
   });
 }
 
+/* -----------------------------------------
+   UI helpers (formatting)
+------------------------------------------ */
+
+const CURRENCY_SYMBOL = {
+  USD: "$",
+  AUD: "$",
+  NZD: "$",
+  CAD: "$",
+  SGD: "$",
+  EUR: "€",
+  GBP: "£",
+  INR: "₹",
+  JPY: "¥",
+};
+
+function formatHotelPrice(priceStr) {
+  if (!priceStr) return "—";
+  const s = String(priceStr).trim();
+
+  // "AUD 1095.14"
+  const m = s.match(/^([A-Za-z]{3})\s*([0-9,]+(?:\.[0-9]+)?)$/);
+  if (m) {
+    const ccy = m[1].toUpperCase();
+    const num = Number(String(m[2]).replace(/,/g, ""));
+    if (!Number.isFinite(num)) return s;
+    const sym = CURRENCY_SYMBOL[ccy] || `${ccy} `;
+    const rounded = Math.round(num);
+    return `${sym}${rounded.toLocaleString("en-US")}`;
+  }
+
+  // "$1095.14" or "1095.14"
+  const num2 = Number(s.replace(/[^0-9.]/g, ""));
+  if (Number.isFinite(num2) && num2 > 0) {
+    const rounded = Math.round(num2);
+    // default to "$" for display like target
+    return `$${rounded.toLocaleString("en-US")}`;
+  }
+
+  return s;
+}
+
 /* --------------- UI bits --------------- */
 
 function StarBadge({ value }) {
   if (!value) return null;
   return (
-    <span className="hc-rating-badge" title={`${value} star rating`}>
+    <div className="hc-rating" title={`${value} star rating`}>
       <span className="hc-rating-star" aria-hidden="true">
         ★
       </span>
       <span className="hc-rating-value">{value}</span>
-    </span>
+    </div>
   );
 }
 
@@ -222,8 +262,39 @@ function AmenityChips({ list }) {
   );
 }
 
+function LocationRow({ city }) {
+  return (
+    <div className="hc-location">
+      <svg
+        className="hc-location-icon"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          d="M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle
+          cx="12"
+          cy="10"
+          r="2.3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        />
+      </svg>
+      <span className="hc-location-text">{city || "Location"}</span>
+    </div>
+  );
+}
+
 function HotelCard({ h, onSelect }) {
   const disabled = !h.srr && !h.search_result_id;
+  const displayPrice = formatHotelPrice(h.price);
 
   return (
     <button
@@ -254,12 +325,7 @@ function HotelCard({ h, onSelect }) {
             <div className="hc-title" title={h.name}>
               {h.name}
             </div>
-            <div className="hc-location">
-              <span className="hc-location-dot" aria-hidden="true" />
-              <span className="hc-location-text">
-                {h.city || "Location"}
-              </span>
-            </div>
+            <LocationRow city={h.city} />
           </div>
           <StarBadge value={h.rating} />
         </div>
@@ -268,7 +334,7 @@ function HotelCard({ h, onSelect }) {
 
         <div className="hc-footer-row">
           <div className="hc-price-block">
-            <div className="hc-price">{h.price || "—"}</div>
+            <div className="hc-price">{displayPrice}</div>
             <div className="hc-price-sub">per night</div>
           </div>
           <span className="hc-select-pill">Select</span>
@@ -283,10 +349,8 @@ function HotelCard({ h, onSelect }) {
 function App() {
   const toolOutput = useOpenAiGlobal("toolOutput");
 
-  // State to freeze hotels after selection
   const [frozenHotels, setFrozenHotels] = useState(null);
 
-  // Use frozen hotels if present (prevents re-render flash after click)
   const hotels = useMemo(() => {
     if (frozenHotels) return frozenHotels;
     return mapHotels(toolOutput || {});
@@ -325,7 +389,6 @@ function App() {
     };
   }, [hotels.length]);
 
-  // Reset frozen state when completely new hotel results arrive
   useEffect(() => {
     if (frozenHotels && toolOutput) {
       const newHotels = mapHotels(toolOutput);
@@ -359,15 +422,11 @@ function App() {
   };
 
   async function onSelectHotel(h) {
-    // 1) Tell backend to block the *next* search_hotels_ui call (one-shot)
     await blockNextHotelSearchOnServer();
-
-    // 2) Freeze the current hotel list BEFORE sending the message
     setFrozenHotels(hotels);
 
     const srr = h.search_result_id || h.srr || "";
 
-    // hotel info that we want the assistant to know
     const hotelInfo = {
       search_result_id: srr,
       hotel_id: h.id,
@@ -402,7 +461,6 @@ function App() {
 
     const prompt = promptLines.join("\n");
 
-    // local UI: remember which hotel was picked (bubble)
     setPicked(hotelInfo);
     setSending(true);
     setSendError(null);
@@ -510,7 +568,6 @@ function App() {
         </div>
       )}
 
-      {/* Diagnostics badge (dev only) */}
       <div className="hc-diagnostics" aria-hidden="true">
         caps:
         {caps.hasFollowUp ? " sendFollowUpMessage" : ""}
